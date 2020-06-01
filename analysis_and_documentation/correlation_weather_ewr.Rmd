@@ -1,0 +1,378 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Now we will join the tables of weather and flight in newark and start to look for correlation, with the delays. 
+
+```{r, include=FALSE}
+library(tidyverse)
+library(here)
+library(GGally)
+library(modelr)
+library(lubridate)
+library(tsibble)
+library(feasts)
+```
+
+```{r, include=FALSE}
+flights <- read_csv(here("clean_data/flights.csv"))
+weather <- read_csv(here("clean_data/weather.csv"))
+
+flights <- flights %>%
+  filter(origin == "EWR")
+
+flights_weather <- flights %>%
+  inner_join(weather, by = "date") %>%
+  select(-c(origin.y, origin.x)) %>%
+  filter(dep_delay != 2500)
+
+flights_weather <- flights_weather %>%
+  mutate(total_delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  group_by(date) %>%
+  summarise(ration_delay = sum(total_delay)/n()) %>%
+  inner_join(flights_weather, by = "date")
+
+flights_weather <- flights_weather %>%
+  filter(between(dep_delay, 15, 2400)) %>%
+  group_by(date) %>%
+  summarise(amount_delays = n()) %>%
+  inner_join(flights_weather, by = "date")
+```
+
+
+```{r}
+flights_weather %>%
+  mutate_at("date", as.Date) %>%
+  group_by(date) %>%
+  summarise(amount_departure = n()) %>%
+  ggplot(aes(x = date, y = amount_departure)) +
+  geom_line()
+```
+
+Between July and September the amount of departure is higher the graph present more peeks
+```{r}
+flights_weather %>%
+  mutate_at("date", as.Date) %>%
+  group_by(date) %>%
+  summarise(amount_departure = n()) %>%
+  as_tsibble() %>%
+  model(STL(amount_departure ~ trend(window = 12))) %>%
+  components() %>%
+  autoplot()
+```
+
+
+The relation between dew point with ratio of delays and amount of delays looks quite same with the relation ofboth of them with temperature and the explanation could be the same, the reason behind the correlation is the increase in the number of schedule flights in summer season. We need to understand that dew_point and temperature are 2 variables that are high correlative.
+```{r}
+flights_weather %>%
+  select(temp, dewp) %>%
+  ggpairs()
+```
+
+
+
+
+Let's check the correlation between wind direction, wind speed and wind gust
+```{r}
+flights_weather %>%
+  select(wind_dir, wind_speed, wind_gust) %>%
+  ggpairs()
+```
+
+Here we can see that wind speed is correlative with wind direction and wind gust, but the more importants is that wind speed and wind gust are quite strong correlative so actually the correlation between wind gust and delays can be explain because the correlation between wind speed and delays. And the small relation between amount of delays and wind direction could be also have a explanatio in the correlation between wind speed and wind direction.
+
+The relation between precipitation and amount of precipitation. Let's check this relation
+
+```{r}
+flights_weather %>%
+  select(precipitation, amount_precipitation) %>%
+  ggpairs(showStrips = TRUE)
+```
+With this we can prove that it is a strong correlation between amount of precipitation and rain and snow the 2 categorical varibles that are more correlative with ration of delays. So we can explore more in the conection between precipitation and ration of delays.
+
+
+
+
+```{r}
+correlation <- function(flights_weather, x, y){
+  return(flights_weather %>%
+  select(!!sym(x), !!sym(y)) %>%
+  ggpairs(showStrips = TRUE))
+}
+```
+
+```{r}
+correlation(flights_weather, "temp", "ration_delay")
+correlation(flights_weather, "temp", "amount_delays")
+correlation(flights_weather, "temp", "dep_delay")
+```
+The three variables that we use for measure delays are:
+- ration_delays: the proportion of flights that were delay over the total of flights that were schedule per hour. (0 - 1)
+- the amount of flights that were delay per hour
+- the duration of the delay
+The weather variables have been taking also by hour.
+
+Here we see a very weak small correlation between temperature and ration of delays per hour (0.14), and the amount of delays and temperature (0.134). The correlation between temperature and duration of delays is extremely weak.
+```{r}
+correlation(flights_weather, "dewp", "ration_delay")
+correlation(flights_weather, "dewp", "amount_delays")
+correlation(flights_weather, "dewp", "dep_delay")
+```
+
+And for logical consecuence the correlation between the 3 variables aren't significally because actually temp and dew_point are highg correlative.
+```{r}
+correlation(flights_weather, "wind_dir", "ration_delay")
+correlation(flights_weather, "wind_dir", "amount_delays")
+correlation(flights_weather, "wind_dir", "dep_delay")
+```
+
+it isn't any correlation between the wind_direction and the 3 variables for measruring delays
+```{r}
+correlation(flights_weather, "wind_speed", "ration_delay")
+correlation(flights_weather, "wind_speed", "amount_delays")
+correlation(flights_weather, "wind_speed", "dep_delay")
+```
+
+Here we can see a weak correlation between the amount_delays (0.321) per hour and the ration_delays (0.334) per_hour with wind_speed. It is also a very weak correlation between the duration of the delay (0.128) and wind_speed.
+
+```{r}
+correlation(flights_weather, "wind_gust", "ration_delay")
+correlation(flights_weather, "wind_gust", "amount_delays")
+correlation(flights_weather, "wind_gust", "dep_delay")
+```
+
+The correlation between the 3 variables and wind_gust is very similar with the correlation that them have with wind_speed. This could be explain by the high correlation between wind_speed and wind_gust.
+```{r}
+correlation(flights_weather, "precipitation", "ration_delay")
+correlation(flights_weather, "precipitation", "amount_delays")
+correlation(flights_weather, "precipitation", "dep_delay")
+```
+
+We can see that the 3 variables change a lot depending of the different types of precipitation. 
+```{r}
+correlation(flights_weather, "amount_precipitation", "ration_delay")
+correlation(flights_weather, "amount_precipitation", "amount_delays")
+correlation(flights_weather, "amount_precipitation", "dep_delay")
+```
+
+Even when it is a correlation between the different types of precipitation and amount of precipitation, the correlation between amount of delays, duration of delays and amount of precipitation doesn't exist, and with the ration of delays is very weak (0.103)
+```{r}
+correlation(flights_weather, "visibility", "ration_delay")
+correlation(flights_weather, "visibility", "amount_delays")
+correlation(flights_weather, "visibility", "dep_delay")
+```
+
+Here we can see a very week negative correlation between amount of delays per hour and visibility (-0.102), and ration_delays per hour and visibility (-0.134). The relation between duration of delays and visibilty doesn't exist.
+
+```{r}
+correlation(flights_weather, "pressure", "ration_delay")
+correlation(flights_weather, "pressure", "amount_delays")
+correlation(flights_weather, "pressure", "dep_delay")
+```
+
+Here we can see a weak negative correlation between ration of delays and the pressure (-0.205), and a very weak correlation between the amount of delays per hour (-0.18) and duration of delays (-0.109) with pressure. 
+
+The only 2 variables that have at less at weak correlation with ration of delays are wind_speed and pressure It is also a weak correlaion with wind_gust, but the problem with this feature is that is strong correlative with wind speed. It is also important study the correlation between the type of precipitation and ration of delays. 
+
+CORRELATION BETWWEN MONTHS AND WEATHER VARIABLES
+
+```{r}
+correlation_month <- function(flights_weather, month, variable) { 
+return(flights_weather %>%
+  filter(month(date) == month) %>%
+  select(!!sym(variable), temp, dewp, wind_dir, wind_speed, wind_gust, visibility, 
+         pressure, precipitation, amount_precipitation) %>%
+  ggpairs(title = as.character(month), showStrips = TRUE))
+} 
+correlation_month(flights_weather, 1, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 1, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 2, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 2, "dep_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 3, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 3, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 4, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 4, "dep_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 5, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 5, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 6, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 6, "dep_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 7, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 7, "dep_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 8, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 8, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 9, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 9, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 10, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 10, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 11, "ration_delay")
+```
+```{r}
+correlation_month(flights_weather, 11, "dep_delay")
+```
+```{r}
+correlation_month(flights_weather, 12, "ration_delay")
+```
+
+```{r}
+correlation_month(flights_weather, 12, "dep_delay")
+```
+
+```{r}
+flights_weather %>%
+  ggplot(aes(x = amount_precipitation)) +
+  geom_histogram(bin = 100)
+```
+Tempeture
+```{r}
+flights_weather %>%
+  filter(temp <= 0 | temp >=35)  %>%
+  select(ration_delay, dep_delay, temp) %>%
+  ggpairs()
+```
+
+```{r}
+flights_weather %>%
+  filter(wind_speed >= 25)  %>%
+  select(ration_delay, dep_delay, wind_speed) %>%
+  ggpairs()
+```
+
+```{r}
+flights_weather %>%
+  filter(amount_precipitation > 0.5)  %>%
+  select(ration_delay, dep_delay, amount_precipitation) %>%
+  ggpairs()
+```
+
+```{r}
+flights_weather %>%
+  filter(temp <=0 & precipitation == "Rain")  %>%
+  select(ration_delay, dep_delay, precipitation, temp) %>%
+  ggpairs()
+```
+
+```{r}
+model_temp <- lm(ration_delay ~ temp + wind_speed, data = flights_weather)
+summary(model_temp)
+```
+
+
+
+
+```{r}
+flights_weather_1 <- flights %>%
+  inner_join(weather, by = "date") %>%
+  select(-c(origin.y, origin.x))
+
+flights_weather_2 <- flights_weather_1 %>%
+  filter(hour(date) >= 6) %>%
+  group_by(hour(date)) %>%
+  summarise(count_t = n())
+
+flights_weather_1 %>%
+  filter(dep_delay == 2500) %>%
+  filter(hour(date) >= 6) %>%
+  group_by(hour(date)) %>%
+  summarise(count = n()) %>%
+  inner_join(flights_weather_2, by = "hour(date)") %>%
+  mutate(avr = count/ count_t)
+  
+```
+
+
+
+```{r}
+f_w <- flights_weather_1 %>%
+  filter(dep_delay == 2500) %>%
+  filter(amount_precipitation > 0.2 |
+           wind_speed >= 20 |
+           temp <= 0 | temp > 35 | precipitation == "Snow" | precipitation == "Ice Pellets")
+
+f_w_2 <- flights_weather_1 %>%
+  filter(amount_precipitation > 0.2 |
+           wind_speed >= 20 |
+           temp <= 0 | temp > 35 | precipitation == "Snow" | precipitation == "Ice Pellets") %>%
+  group_by(hour(date)) %>%
+  summarise(count_t = n())
+
+
+f_w %>%
+  filter(hour(date) >= 6) %>%
+  group_by(hour(date)) %>%
+  summarise(count = n()) %>%
+  inner_join(f_w_2, by = "hour(date)") %>%
+  mutate(avr = count/ count_t)
+```
+```{r}
+
+f_w <- flights_weather_1 %>%
+  filter(dep_delay == 2500 ) %>%
+  filter(!(amount_precipitation > 0.2 |
+           wind_speed >= 20 |
+           temp <= 0 | temp > 35 | precipitation == "Snow" | precipitation == "Ice Pellets"))
+
+f_w_2 <- flights_weather_1 %>%
+   filter(!(amount_precipitation > 0.2 |
+           wind_speed >= 20 |
+           temp <= 0 | temp > 35 | precipitation == "Snow" | precipitation == "Ice Pellets")) %>%
+  group_by(hour(date)) %>%
+  summarise(count_t = n())
+
+f_w %>%
+  filter(hour(date) >= 6) %>%
+  group_by(hour(date)) %>%
+  summarise(count = n()) %>%
+  inner_join(f_w_2, by = "hour(date)") %>%
+  mutate(avr = count/ count_t)
+
+```

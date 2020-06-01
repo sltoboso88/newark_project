@@ -34,6 +34,9 @@ month_weather <- weather %>%
   mutate(month = str_sub(data, start = 6, end = 7)) %>%
   mutate(hour = str_sub(data, start = 10, end = 11)) %>%
   mutate(minute = str_sub(data, start = 12, end = 13)) %>%
+  mutate(hour = as.integer(hour) + 1) %>%
+  mutate(date = make_datetime(as.integer(year), as.integer(month), as.integer(day), as.integer(hour))) %>%
+  select(- c(year, day, month, hour, minute)) %>%
   mutate(temp_dew = str_extract(data, pattern = "M?[0-9]{2}/M?[0-9]{2}")) %>%
   separate(col = temp_dew,
            into = c("temp", "dewp"),
