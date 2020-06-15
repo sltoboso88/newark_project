@@ -4,3 +4,108 @@ output: html_notebook
 ---
 
 
+```{r, include=FALSE}
+library(tidyverse)
+library(here)
+library(lubridate) 
+library(directlabels)
+```
+After we found that the correlation isn't high enough with all the factors we have decided to start to analysis the problem in a different way, we want to see how is the behavior of the flights per hour (because it is high correlative with delays and cancellations) with normal weather condition and with extreme weather conditions.
+For this matter extreme weather conditions will be:
+
+Precipitation: Snow Ice_pellets and Rain
+Wind speed equal or higher than 17 knots 
+Visibility equal or lower than 3
+Pressure lower than 29.8 and Higher than 30.7
+```{r, include=FALSE}
+flights <- read_csv(here("clean_data/flights.csv"))
+weather <- read_csv(here("clean_data/weather.csv"))
+
+
+flights_weather <- flights %>%
+  inner_join(weather, by = c("date", "origin")) 
+```
+
+```{r}
+f_w <- flights_weather %>%
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  mutate(weather_type = ifelse(wind_speed >= 17 | precipitation %in% c("Snow", "Ice Pellets", "Rain") | 
+                                 visibility <= 3 |pressure <= 29.7 | pressure >= 30.7, "Adverse","Normal")) %>%
+  group_by(origin, hour, weather_type) %>%
+  summarise(total_flights = n())
+
+flights_ration <- flights_weather %>% 
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  mutate(weather_type = ifelse(wind_speed >= 17 | precipitation %in% c("Snow", "Ice Pellets", "Rain") | 
+                                 visibility <= 3 |pressure <= 29.7 | pressure >= 30.7, "Adverse","Normal")) %>%
+  mutate(delay = case_when(dep_delay < 15 ~ "on_time",
+                           dep_delay >= 15 & dep_delay <= 2400 ~ "Delays",
+                           dep_delay == 2500 ~ "Cancellations")) %>%
+  group_by(origin, hour, weather_type, delay) %>%
+  summarise(total_p_0_1_2 = n(), mean_delay = median(dep_delay)) %>%
+  inner_join(f_w, by = c("origin", "hour", "weather_type")) %>%
+  mutate(ration = total_p_0_1_2/ total_flights * 100)
+
+create_comparation_plot <- function(d_variable) { 
+ return(
+flights_ration %>%
+  filter(delay == d_variable) %>%
+  ggplot(aes(x = hour, y = ration)) +
+  geom_line(aes(group = weather_type, color = weather_type)) +
+  facet_grid(~origin))
+} 
+
+create_comparation_plot("Delays") +
+  scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = weather_type), method = list(dl.trans(x = x - 0.7), 
+                                              "last.points", cex = 0.6)) +
+  labs(
+    title = "Comparing departure delays across New York airports",
+    subtitle = "In different weather conditions",
+    x = "From 6:00 to 24:00", 
+    y = "Percentage of scheduled departures",
+    color = ""
+  )
+```
+Here we can see than the adverse weather conditions make the percentage of delays higher in all the airports across the day, but for Newark is worst than for the other airports.
+```{r}
+
+create_comparation_plot("Cancellations") +
+  scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = weather_type), method = list(dl.trans(x = x - 0.7), 
+                                              "last.points", cex = 0.6)) +
+  labs(
+    title = "Comparing departure cancellations across New York airports",
+    subtitle = "In differents weather conditions",
+    x = "From 6:00 to 24:00", 
+    y = "Percentage of scheduled departures",
+    color = ""
+  )
+  
+```
+Here we can see than the adverse weather conditions make the percentage of cancellations higher in all the airports across the day, but for La Guardia is the most affected than the other airports.
+```{r}
+flights_weather %>% 
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  filter(dep_delay!= 2500) %>%
+  mutate(weather_type = ifelse(wind_speed >= 17 | precipitation %in% c("Snow", "Ice Pellets", "Rain") | 
+                                 visibility <= 3 |pressure <= 29.7 | pressure >= 30.7, "Adverse","Normal")) %>%
+  group_by(origin, hour, weather_type) %>%
+  summarise(mean_delay = median(dep_delay)) %>%
+  ggplot(aes(x = hour, y = mean_delay)) +
+  geom_line(aes(group = weather_type, color = weather_type)) +
+  scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = weather_type), method = list(dl.trans(x = x - 0.7), 
+                                              "last.points", cex = 0.6)) +
+  labs(title = "Average deviation to scheduled departure time across New York airports",
+       subtitle = "In different weather conditions",
+       x = "From 6:00 to 24:00", 
+       y = "Deviation in minutes", 
+       color = "") +
+  facet_grid(~origin)
+```
+
+Here we can see the waiting time and in adverse weather conditions the waiting time is higher in all the airports across the day, but for Newark is worst than for the other airports.

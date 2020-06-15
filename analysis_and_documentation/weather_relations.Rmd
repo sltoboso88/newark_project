@@ -1,0 +1,390 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(here)
+library(feasts)
+library(directlabels)
+library(GGally)
+```
+Here we analyze some relations between the weather features and delays and cancellations. 
+
+It is important to notice that for us delay is when the departure time is 15 minutes or more. 
+
+```{r, include=FALSE}
+#here read the flights and weather tables
+flights <- read_csv(here("clean_data/flights.csv"))
+weather <- read_csv(here("clean_data/weather.csv"))
+
+#delay columns is a column with categorical variables that show the status of the flight 
+flights <- flights %>%
+   mutate(delay = case_when(dep_delay >= 15 & dep_delay <= 2400 ~ "Delayed",
+                           dep_delay == 2500 ~ "Cancelled",
+                            dep_delay < 15 ~ "On_time")) %>%
+  group_by(origin, date, delay) %>%
+  summarise(total_c_d = n()) 
+
+#Here we join the flights and weather tables by origin and date 
+flights_weather <- flights %>%
+  inner_join(weather, by = c("origin", "date")) 
+```
+
+The airports in NewYork close at 24:00 and open at 6 am the flights that are schedule between 00:01 to 05:59 aren't comercial and they are only the 0.59% of the total flights in Newark, so we will not include them in the study. 
+```{r}
+total_flights_6 <- flights_weather %>%
+  filter(hour(date) < 6) %>%
+  filter(origin == "EWR") %>%
+  summarise(total_total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total_total))
+
+total_flights <- flights_weather %>%
+  filter(origin == "EWR") %>%
+  summarise(total_total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total_total))
+
+total_flights_6[2]/total_flights[2]
+```
+
+
+Firts we will run a correlation test between weather variables and ration of delays
+```{r, include=FALSE}
+total_flights <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  summarise(total_total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total_total))
+
+flights_weather <- flights_weather %>%
+  mutate(ration = total_c_d/ total_flights$total_total *100)
+```
+
+```{r}
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay == "Delayed") %>%
+  select(origin, date, ration, temp, dewp, wind_dir, wind_speed, wind_gust) %>%
+  ggpairs()
+  
+```
+```{r}
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay == "Delayed") %>%
+  select(origin, date, ration, precipitation, amount_precipitation, pressure, visibility) %>%
+  ggpairs()
+```
+
+```{r}
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay == "Cancelled") %>%
+  select(origin, date, ration, temp, dewp, wind_dir, wind_speed, wind_gust) %>%
+  ggpairs()
+```
+```{r}
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay == "Cancelled") %>%
+  select(origin, date, ration, precipitation, amount_precipitation, pressure, visibility) %>%
+  ggpairs()
+```
+Here we can see that actually the weather variables aren't high correlated with delays and cancellations. One of the reasons could be that actully it isn't any relation, of the reasons that one flight can be delay or cancel are so many that is impossible to extract this in a correlation text. So probably the best way is plot the differnt weather variables vs ration of delayed and cancelled flights, with the averege of delays and cancellations.  We will do this with the variables that the correlation is equal or higher than 2 (visibility, pressure, precipitation, wind_speed -wind gust not because it is high correlative with wind speed-)
+```{r}
+#This give as the general ration od delays and cancellations in Newark airpot
+ration_delay <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  group_by(delay) %>%
+  summarise(total = sum(total_c_d)) %>%
+  mutate(total_total = total_flights$total_total) %>%
+  mutate(ration = total/total_total *100) %>%
+  mutate(weather_condition = "All weather") %>%
+  mutate(ration_inside = ration)
+ration_delay <- ration_delay[,c(1,2,4,5,3,6)]
+
+```
+
+The ration of cancelled flights in newark airport is 2.50 and delays flights is 24.19
+```{r}
+find_ration <- function(x){
+  return(ration_delay %>%
+           filter(delay == x) %>%
+           select(ration))
+}
+ewr_cancel <- find_ration("Cancelled")
+ewr_delay <- find_ration("Delayed")
+```
+
+We will start to create different plots for seeing how is the behavior of delete and cancelation in some weather conditions.
+```{r}
+#This is a function that return the plot depend of the wetaher variable that we ask 
+make_table <- function(flights_weather, w_variable){
+  
+aux <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  group_by(!!sym(w_variable)) %>%
+  summarise(total = sum(total_c_d))
+
+return(flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay != "On_time") %>%
+  group_by(!!sym(w_variable), delay) %>%
+  summarise(total_c_d = sum(total_c_d)) %>%
+  inner_join(aux, by = w_variable) %>%
+  mutate(ration_delay = (total_c_d/total) * 100) %>%
+    ggplot(aes_string(x = w_variable, y = "ration_delay")) +
+    geom_line(aes(group = delay, color = delay)) +
+    geom_hline(yintercept = as.integer(ewr_cancel[1]), color = "tomato2", linetype = "dashed") +
+    geom_hline(yintercept = as.integer(ewr_delay[1]), color= "turquoise3", linetype = "dashed")) 
+}
+```
+
+
+```{r}
+make_table(flights_weather, "visibility") +
+    scale_x_continuous(breaks = 0:10) +
+    scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = delay), method = list(dl.trans(x = x - 1.5), 
+                                              "last.points", cex = 0.1)) +
+    geom_vline(xintercept = 3, color = "black", linetype = "dashed") +
+    labs(
+      title = "Relationship between visibility and departure delays & cancellations",
+      x = "Visibility (miles)",
+      y = "Percentage of scheduled departures",
+      color = ""
+    )
+
+produce_total_under <- function(w_variable, x){
+  flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(!!sym(w_variable) <= x) %>%
+  group_by(!!sym(w_variable)) %>%
+  summarise(total = sum(total_c_d)) %>%
+  summarise(total_under = sum(total))
+}
+
+produce_total_under("visibility", 3)[1]/total_flights$total_total * 100
+```
+Here we can see that when the visibility is lower than 10 miles the ration delays and cancellations are above the average but the situation is particullary bad when the visibility is 3 or lower, at this point the ration of delays have a big peek close to 35 percent of the total flights are delay and lower than this the cancellations ans delays have the bigest peeks. 
+5.3% of the flights that were schedule in Newark airport during 2017 had visibility lower or equal to 3.
+
+
+```{r}
+
+make_table(flights_weather, "wind_speed") +
+  scale_x_continuous(n.breaks = 5, breaks = c(0, 5, 10, 15, 20, 25, 30, 35)) +
+    scale_color_discrete(guide = guide_legend(reverse = TRUE)) +
+    geom_vline(xintercept = 17, color = "black", linetype = "dashed") +
+    scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = delay), method = list(dl.trans(x = x + 2), 
+                                              "first.points", cex = 0.8)) +
+    labs(
+      title = "Relationship between wind speed and departure delays & cancellations",
+      x = "Wind (knots)",
+      y = "Percentage of scheduled departures",
+      color = ""
+    )
+100 - (produce_total_under("wind_speed", 16)[1]/total_flights$total_total* 100)
+```
+
+Here we can see that when the wind is around 9 knots the ration of delays start to increase, but around 17 knots or more the ration of delays and cancellations start to increase a lot and present the bigest peeks. 
+6.88% of the flights that were schedule in Newark airport during 2017 had wind higher or equal to 17 knots.
+
+
+```{r}
+make_table(flights_weather, "temp") +
+  scale_x_continuous(n.breaks = 5) +
+    scale_color_discrete(guide = guide_legend(reverse = TRUE)) +
+    geom_vline(xintercept = -2, color = "black", linetype = "dashed") +
+    geom_vline(xintercept = 30, color = "black", linetype = "dashed") +   
+    labs(
+      title = "Relationship between temperature and departure delays & cancellations",
+      x = "Temperature (celsius)",
+      y = "Percentage of scheduled departures",
+      color = ""
+    )
+produce_total_under("temp", -2)[1]/total_flights$total_total* 100
+100 - (produce_total_under("temp", 29)[1]/total_flights$total_total * 100)
+```
+With extreme temperatures we can see a bad behavior, but actually the correlation between temperature and flights delayed and cancelled is very low, so we will not include temperature as weather factor.
+
+```{r}
+make_table(flights_weather, "pressure")  +
+    scale_color_discrete(guide = guide_legend(reverse = TRUE)) +
+    geom_vline(xintercept = 29.7, color = "black", linetype = "dashed") + 
+    geom_vline(xintercept = 30.7, color = "black", linetype = "dashed") + 
+    scale_color_discrete(guide = "none") +
+    geom_dl(aes(label = delay), method = list(dl.trans(x = x - 3), 
+                                              "last.points", cex = 0.8)) +
+    labs(
+      title = "Relationship between air pressure and departure delays & cancellations",
+      x = "Air pressure (inHg)",
+      y = "Percentage of scheduled departures",
+      color = ""
+    )
+produce_total_under("pressure", 29.7)[1]/total_flights$total_total * 100
+100 - (produce_total_under("pressure", 30.6)[1]/total_flights$total_total * 100)
+
+```
+The ration of delays and cancel flights have a lots peeks when the pressure is lower than 29.7 and higher than 30.7 
+```{r}
+aux <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  group_by(precipitation) %>%
+  summarise(total = sum(total_c_d))
+
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(delay != "On_time") %>%
+  group_by(precipitation, delay) %>%
+  summarise(total_c_d = sum(total_c_d)) %>%
+  inner_join(aux, by = "precipitation") %>%
+  mutate(ration_delay = (total_c_d/total) * 100) %>%
+    ggplot(aes(x = precipitation, y = ration_delay)) +
+    geom_col(aes(fill = delay)) +
+    geom_hline(yintercept = 2, color = "tomato2", linetype = "dashed") +
+    geom_hline(yintercept = 24, color = "turquoise3", linetype = "dashed") +
+    scale_fill_discrete(guide = "none") +
+    facet_grid(~delay)+
+  labs(
+      title = "Relationship between type of precipitation and departure delays & cancellations",
+      x = "Precipitation type",
+      y = "Percentage of scheduled departures",
+      fill = ""
+    )
+
+flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  group_by(precipitation) %>%
+  summarise(total = sum(total_c_d) / total_flights$total_total *100) 
+
+```
+Here we can see that when the precipitation is equal to Ice Pellets (0.16%) or Snow (1.76%)the ration of cancelation increase a lot, with Rains is above the averag. In the case of  Delays when is Rain (13.20 %) or Snow  the ration of delays are above the average. The amount of precipitation we will not consider because the correlation with cancellations and delays is very low and actually the precipitation is a better definer of the weather condition that the amount of precipitation. 
+
+Now we will create a table with all the conditions that we will consider as definition of serious wetaher conditions and with this table we wil be able to plot the efect of de conditions in delays and cancelations in Newark Airport
+```{r}
+aux_1 <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(visibility <= 3) %>%
+  summarise(total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total))
+
+visibility <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(visibility <= 3) %>%
+  group_by(delay) %>%
+  summarise(total = sum(total_c_d)) %>%
+  mutate(ration = total/114953 * 100) %>%
+  mutate(weather_condition = "Low visibility") %>%
+  mutate(total_total = aux_1$total_total) %>%
+  mutate(ration_inside = total/total_total *100)
+```
+
+
+```{r}
+aux_1 <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(wind_speed >= 17) %>%
+  summarise(total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total))
+
+wind_speed <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(wind_speed >= 17) %>%
+  group_by(delay) %>%
+  summarise(total = sum(total_c_d)) %>%
+  mutate(ration = total/114953 * 100) %>%
+  mutate(weather_condition = "High wind") %>%
+  mutate(total_total = aux_1$total_total) %>%
+  mutate(ration_inside = total/total_total *100)
+```
+
+
+```{r}
+aux_1 <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(pressure <= 29.7 | pressure >= 30.6) %>%
+  summarise(total = sum(total_c_d)) %>%
+  summarise(total_total = sum(total))
+ 
+pressure <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  filter(pressure <= 29.7 | pressure >= 30.6) %>%
+  group_by(delay) %>%
+  summarise(total = sum(total_c_d)) %>%
+  mutate(ration = total/114953 * 100) %>%
+  mutate(weather_condition = "Pressure") %>%
+  mutate(total_total = aux_1$total_total) %>%
+  mutate(ration_inside = total/total_total *100)
+ 
+
+```
+
+```{r}
+aux <- flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  rename(weather_condition= precipitation) %>%
+  filter(weather_condition %in% c("Snow", "Ice Pellets", "Rain")) %>%
+  group_by(weather_condition) %>%
+  summarise(total_total = sum(total_c_d))
+
+precipitation <- as.tibble(flights_weather %>%
+  filter(hour(date) >= 6) %>%
+  filter(origin == "EWR") %>%
+  rename(weather_condition= precipitation) %>%
+  filter(weather_condition %in% c("Snow", "Ice Pellets", "Rain")) %>%
+  group_by(weather_condition, delay) %>%
+  summarise(total= sum(total_c_d)) %>%
+  mutate(ration = total/114953 * 100) %>%
+  select(-weather_condition, weather_condition) %>%
+  inner_join(aux, by ="weather_condition") %>%
+  mutate(ration_inside = (total/ total_total)* 100))
+```
+
+```{r}
+table <- rbind(visibility, wind_speed, pressure, precipitation, ration_delay)
+  
+```
+
+```{r}
+table %>%
+  filter(weather_condition != "All weather") %>%
+  ggplot(aes(x = weather_condition, y = ration, fill = delay)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Percentage of flights in each type of adverse weather condition",
+       x = "Adverse weather condition",
+       y = "Percentage of all flights",
+      fill = "")
+```
+```{r}
+table %>%
+  ggplot(aes(x = weather_condition, y = ration_inside, fill = delay)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_discrete(guide = "none") +
+  labs(title = "Percentage of flights within each type of adverse weather condition",
+       x = "Adverse weather condition",
+       y = "Percentage of flights",
+      fill = "")
+```
+

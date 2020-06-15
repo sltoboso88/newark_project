@@ -1,0 +1,230 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+library(tidyverse)
+library(GGally)
+library(lubridate)
+library(here)
+library(directlabels)
+```
+
+```{r, include=FALSE}
+flights <- read_csv(here("clean_data/flights.csv")) 
+flights <- flights %>%
+  filter(hour(date) >= 6) 
+
+planes <- read_csv(here("clean_data/planes.csv"))
+
+flights_planes <- planes %>%
+  select(tailnum, year, seats) %>%
+  inner_join(flights, by = "tailnum")
+```
+Here I will look the ration of cancelation and delays lines by date
+```{r}
+flights %>%
+  filter(origin == "EWR") %>%
+  mutate_at("date", as.Date) %>%
+  mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+  group_by(date) %>%
+  summarise(ration_delay = sum(delay)/n(),
+            ration_cancelation = sum(cancelation)/n()) %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = ration_delay), col = "black") +
+  geom_line(aes(y = ration_cancelation), col = "red")
+```
+It is few peeks in cancellations between january to March.
+Here I will look the ration of cancelation and delays lines by hour
+```{r}
+fly <- flights%>%
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  filter(origin == "EWR") %>%
+  group_by(hour) %>%
+  summarise(total = n())
+
+flights %>%
+  filter(origin == "EWR") %>%
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  mutate(delay = case_when(dep_delay < 15 ~ "on_time",
+                           dep_delay >= 15 & dep_delay <= 2400 ~ "Delays",
+                           dep_delay == 2500 ~ "Cancellations")) %>%
+  group_by(hour, delay) %>%
+  summarise(total_delay = n() ) %>%
+  inner_join(fly, by = "hour")  %>%
+  mutate(ration = total_delay/total *100) %>%
+  filter(delay != "on_time") %>%
+  ggplot(aes(x = hour, y = ration)) +
+  geom_line(aes(group = delay, color = delay )) +
+  scale_color_discrete(guide = "none") +
+  geom_dl(aes(label = delay), method = list(dl.trans(x = x - 0.8), 
+                                              "last.points", cex = 0.6)) +
+  geom_hline(yintercept = 2, color = "tomato2", linetype = "dashed") +
+  geom_hline(yintercept = 24, color = "turquoise3", linetype = "dashed")  +
+   labs(
+      title = "Relationship between hour of the day and departure delays & cancellations",
+      x = "From 6:00 to 24:00",
+      y = "Percentage of scheduled departures",
+      color = ""
+    )
+```
+Here I will check the correlation between the ration of delay and cancellation with the hour of the day
+```{r}
+flights %>%
+  filter(origin == "EWR") %>%
+  mutate(hour = hour(date)) %>%
+  filter(hour >= 6) %>%
+  mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+  group_by(hour) %>%
+  summarise(ration_delay = sum(delay)/n(),
+            ration_cancellation = sum(cancelation)/n()) %>%
+  ggpairs()
+```
+
+So here we can see a strong correlation between ration of delays and hour of the day, and the causation behind this could be that the delay that they have in the begining of the day (6 am), it will transmit to the next hour and so on during the day. 
+
+COMPARATIONS BETWEEN AIRPORTS
+
+Now we will plot the number of scheduled departures across the different airports in New York by month
+```{r}
+flights %>%
+  mutate(delay = case_when(dep_delay >= 15 & dep_delay <= 2400 ~ "Delays",
+                           dep_delay == 2500 ~ "Cancellations",
+                           dep_delay < 15 ~ "On_time")) %>%
+  mutate(month = month(date)) %>%
+  group_by(origin, month) %>%
+  summarise(total = n()) %>%
+  ggplot(aes(x = month, y = total, color = origin)) +
+  geom_line() +
+  scale_color_discrete(guide = "none") +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+        labels=c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep","Oct",
+                 "Nov", "Dec")) +
+  geom_dl(aes(label = origin), method = list(dl.trans(x = x), 
+                                              "last.points", cex = 0.6)) +
+  labs(title = "Comparing total number of scheduled departures",
+       subtitle ="Across airports by month in 2017",
+       x = "Time (month)", 
+       y = "Total flight departures"
+       ) 
+```
+Here we see that actually Newark airport was the airport with the higher number of schedules in 2017, with a big peek in August.
+
+Now we will plot the ration of delays, cancellation and on_time flights by month across the 3 airports in New York
+```{r}
+fligths_months <- flights %>%
+  mutate(month = month(date)) %>%
+  group_by(origin, month) %>%
+  summarise(total = n())
+
+flights %>%
+   mutate(delay = case_when(dep_delay >= 15 & dep_delay <= 2400 ~ "Delays",
+                           dep_delay == 2500 ~ "Cancellations",
+                            dep_delay < 15 ~ "On_time")) %>%
+  mutate(month = month(date)) %>%
+  group_by(origin, month, delay) %>%
+  summarise(total_month= n()) %>%
+  inner_join(fligths_months, by = c("origin", "month")) %>%
+  mutate(average_month = total_month/total *100) %>% 
+  ggplot(aes(x = month, y = average_month, color = delay)) +
+  geom_line() +
+  scale_color_discrete(guide = "none") +
+  scale_x_continuous(breaks = c(1, 4, 7, 10),
+        labels=c("Jan", "Apr", "Jul", "Oct")) +
+  geom_dl(aes(label = delay), method = list(dl.trans(x = x - 1.3), 
+                                              "last.points", cex = 0.6)) +
+  labs(title = "Comparing on-time, delayed and cancelled departures",
+       subtitle ="Across airports by month in 2017",
+       x = "Time (month)", 
+       y = "Percentage of flight departures"
+       ) +
+  facet_grid(~origin)
+
+
+ 
+```
+
+The trend is quite the same in the 3 plots with a higher peek of on times in November in JFK and LGA.
+
+
+CARRIER AND THE RELATION WITH THE DELAYS AND CANCELLATION
+
+First we will plot the ration of delay and cancel flight by Carrier and the volumen of the point will be the total of flights that that carrier scheduled in 2017. 
+
+```{r}
+carrier <- read_csv(here("raw_data/airlines.csv"))
+
+
+  
+flights %>%
+    filter(origin == "EWR") %>%
+    filter(hour(date) >= 6) %>%
+    inner_join(carrier, by = "carrier") %>%
+    mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+    mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+    group_by(name) %>%
+    summarise(ration_delays= sum(delay) /n() * 100, total_flights = n()/114953, 
+              ration_cancel=   sum(cancelation) /n() * 100) %>%
+  ggplot(aes(x = ration_cancel, y = ration_delays, color = name, 
+                 size = total_flights, label = name)) +
+  geom_point() +
+  scale_color_discrete(guide = "none") +
+  scale_size(guide = "none") +
+  geom_text(aes(label = name), hjust= -0.1, vjust=0) +
+  scale_y_continuous(breaks = 0:35, n.breaks = 5) +
+  geom_vline(xintercept = 2, color = "tomato2", linetype = "dashed") +
+  geom_hline(yintercept = 24, color = "turquoise3", linetype = "dashed") +
+  labs(
+      title = "Comparison of delays and cancellations across carriers",
+      x = "Percentage of cancelled flights",
+      y = "Percentage of delayed flights",
+      color = "",
+      size = "No of flights"
+    )
+```
+
+DESTINATION AND THE RELATION WITH THE DELAYS AND CANCELLATION
+
+First we will plot the ration of delay and cancel flight by Destination and the volumen of the point will be the total of flights that the carrier scheduled in 2017. 
+```{r}
+flights %>%
+  filter(origin == "EWR") %>%
+  filter(hour(date) >= 6) %>%
+  mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+  group_by(dest) %>%
+  summarise(ration_delays= sum(delay) /n() * 100, total_flights = n(), ration_cancel= sum(cancelation) /n() *100) %>%
+  ggplot() +
+  geom_point(aes(x = ration_cancel, y = ration_delays, color = dest, size = total_flights)) 
+```
+ The points are very spreed so we will not consider the destination as a factor that could origin them.
+
+```{r}
+flights_planes %>%
+  filter(origin == "EWR") %>%
+  mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+  group_by(seats) %>%
+  summarise(ration_delays= sum(delay) /n(), total_flights = n(), ration_cancel= sum(cancelation) /n()) %>%
+  ggplot() +
+  geom_point(aes(x = ration_cancel, y = ration_delays, color = seats, size = total_flights)) 
+  
+  
+```
+It isn't any relation between the amount of seats in a flight and the ration of cancellations and delays
+```{r}
+flights_planes %>%
+  filter(origin == "EWR") %>%
+  mutate(delay = ifelse(between(dep_delay, 15, 2400), 1, 0)) %>%
+  mutate(cancelation = ifelse(dep_delay == 2500, 1, 0)) %>%
+  group_by(seats) %>%
+  summarise(ration_delays= sum(delay) /n(), total_flights = n(), ration_cancel= sum(cancelation) /n()) %>%
+  ggpairs()
+```
+
+
